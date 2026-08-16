@@ -133,6 +133,66 @@
   }
   body.listening #interim { color: #6B4E00; }
 
+  /* ---------- TOOLBAR ---------- */
+  .toolbar {
+    width: 100%;
+    display: flex;
+    gap: 12px;
+    margin-top: 18px;
+  }
+  .tool {
+    flex: 1;
+    border: none;
+    border-radius: 22px;
+    background: #EFE7F5;
+    color: var(--ink);
+    font-family: inherit;
+    font-size: 1.22rem;
+    font-weight: 700;
+    padding: 18px 10px;
+    min-height: 64px;
+    cursor: pointer;
+    touch-action: manipulation;
+  }
+  .tool:active { background: #E2D5EE; }
+
+  #filterBar {
+    display: none;
+    width: 100%;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    background: #FBE9EF;
+    border: 2px solid #E0788F;
+    border-radius: 20px;
+    padding: 12px 16px;
+    margin-top: 18px;
+    font-size: 1.15rem;
+    font-weight: 700;
+  }
+  #filterBar.on { display: flex; }
+  #clearFilter {
+    border: none;
+    border-radius: 14px;
+    background: var(--ink);
+    color: #fff;
+    font-family: inherit;
+    font-size: 1.05rem;
+    font-weight: 700;
+    padding: 12px 16px;
+    min-height: 50px;
+    cursor: pointer;
+  }
+
+  .dayHeader {
+    font-family: 'Fraunces', serif;
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: var(--amber-deep);
+    margin: 10px 0 -2px;
+    padding-left: 6px;
+  }
+
   /* ---------- LISTE DES NOTES ---------- */
   #notesTitle {
     font-family: 'Fraunces', serif;
@@ -303,6 +363,16 @@
     Ouvre Mémory dans <strong>Google Chrome</strong>.
   </div>
 
+  <div class="toolbar">
+    <button id="todayBtn" class="tool">📖 Ma journée</button>
+    <button id="searchBtn" class="tool">🔍 Chercher</button>
+  </div>
+
+  <div id="filterBar">
+    <span id="filterLabel"></span>
+    <button id="clearFilter">Tout afficher</button>
+  </div>
+
   <div id="notesTitle">Mes notes</div>
   <div id="notes"></div>
   <div id="empty">Aucune note pour l'instant.<br>Appuie sur le gros bouton et parle.</div>
@@ -353,20 +423,49 @@ function deleteNote(id) {
 }
 
 /* ---------- Affichage ---------- */
-function fmtWhen(ts) {
+function dayLabel(ts) {
   const d = new Date(ts), now = new Date();
-  const time = d.toLocaleTimeString('fr-BE', { hour: '2-digit', minute: '2-digit' });
   const day0 = x => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
   const diff = (day0(now) - day0(d)) / 86400000;
-  if (diff === 0) return 'Aujourd\u2019hui à ' + time;
-  if (diff === 1) return 'Hier à ' + time;
-  return d.toLocaleDateString('fr-BE', { weekday: 'long', day: 'numeric', month: 'long' }) + ' à ' + time;
+  if (diff === 0) return 'Aujourd\u2019hui';
+  if (diff === 1) return 'Hier';
+  return d.toLocaleDateString('fr-BE', { weekday: 'long', day: 'numeric', month: 'long' });
 }
+function timeLabel(ts) {
+  return new Date(ts).toLocaleTimeString('fr-BE', { hour: '2-digit', minute: '2-digit' });
+}
+function fmtWhen(ts) {
+  return dayLabel(ts).toLowerCase() === 'aujourd\u2019hui'
+    ? 'aujourd\u2019hui à ' + timeLabel(ts)
+    : dayLabel(ts) + ' à ' + timeLabel(ts);
+}
+function spokenTime(ts) {
+  const d = new Date(ts), h = d.getHours(), m = d.getMinutes();
+  return h + ' heure' + (h > 1 ? 's' : '') + (m ? ' ' + m : '');
+}
+
+let activeFilter = null;
+
 function renderNotes() {
-  const notes = loadNotes();
+  const all = loadNotes();
+  const notes = activeFilter
+    ? all.filter(n => n.text.toLowerCase().includes(activeFilter))
+    : all;
   emptyEl.style.display = notes.length ? 'none' : 'block';
+  emptyEl.innerHTML = activeFilter
+    ? 'Aucune note avec «\u00A0' + activeFilter + '\u00A0».'
+    : 'Aucune note pour l\u2019instant.<br>Appuie sur le gros bouton et parle.';
   notesEl.innerHTML = '';
+  let lastDay = null;
   for (const n of notes) {
+    const dl = dayLabel(n.ts);
+    if (dl !== lastDay) {
+      lastDay = dl;
+      const h = document.createElement('div');
+      h.className = 'dayHeader';
+      h.textContent = dl;
+      notesEl.append(h);
+    }
     const card = document.createElement('div');
     card.className = 'note';
     const txt = document.createElement('div');
@@ -374,7 +473,7 @@ function renderNotes() {
     txt.textContent = n.text;
     const meta = document.createElement('div');
     meta.className = 'when';
-    meta.textContent = fmtWhen(n.ts);
+    meta.textContent = timeLabel(n.ts);
     const actions = document.createElement('div');
     actions.className = 'actions';
     const play = document.createElement('button');
@@ -659,6 +758,110 @@ holdDel.addEventListener('pointerup', holdStop);
 holdDel.addEventListener('pointerleave', holdStop);
 holdDel.addEventListener('pointercancel', holdStop);
 cancelDel.onclick = closeDelete;
+
+/* ---------- Lecture longue (file de phrases, fiable sur Android) ---------- */
+function speakLong(parts, onDone) {
+  pauseRecognition();
+  const myId = ++speakSeq;
+  speakingText = null;
+  speechSynthesis.cancel();
+  let i = 0;
+  function next() {
+    if (myId !== speakSeq) return;           // une autre voix a pris la main
+    if (i >= parts.length) {
+      if (onDone) onDone();
+      resumeRecognitionIfSession();
+      return;
+    }
+    const u = new SpeechSynthesisUtterance(parts[i++]);
+    u.lang = 'fr-FR';
+    if (frVoice) u.voice = frVoice;
+    u.rate = 0.95;
+    u.onend = u.onerror = next;
+    speechSynthesis.speak(u);
+  }
+  next();
+}
+
+/* ---------- Ma journée : relire toutes les notes du jour ---------- */
+function readToday() {
+  if (session) endSession('tap');
+  const today = dayLabel(Date.now());
+  const notes = loadNotes().filter(n => dayLabel(n.ts) === today).reverse(); // chrono
+  if (!notes.length) {
+    speak('Tu n\u2019as rien noté aujourd\u2019hui.');
+    return;
+  }
+  const parts = [];
+  parts.push(notes.length === 1
+    ? 'Aujourd\u2019hui, tu as noté une chose.'
+    : 'Aujourd\u2019hui, tu as noté ' + notes.length + ' choses.');
+  for (const n of notes) parts.push('À ' + spokenTime(n.ts) + ' : ' + n.text + '.');
+  parts.push('C\u2019est tout pour aujourd\u2019hui.');
+  speakLong(parts);
+}
+
+/* ---------- Recherche vocale : "quel mot ?" → filtre + lecture ---------- */
+let searching = false;
+
+function startSearch() {
+  if (searching || !SR) return;
+  if (session) endSession('tap');
+  searching = true;
+  statusEl.textContent = 'Recherche : dis le mot à chercher.';
+  speak('Quel mot veux-tu chercher ?', () => {
+    const r = new SR();
+    r.lang = 'fr-FR';
+    r.continuous = false;
+    r.interimResults = false;
+    const stopSearch = () => { searching = false; };
+    const timeout = setTimeout(() => { try { r.stop(); } catch (e) {} }, 8000);
+    r.onresult = e => {
+      clearTimeout(timeout);
+      const word = (e.results[0][0].transcript || '').trim().toLowerCase();
+      if (word) runSearch(word);
+      else speak('Je n\u2019ai pas entendu de mot.');
+      stopSearch();
+    };
+    r.onerror = () => {
+      clearTimeout(timeout);
+      speak('Je n\u2019ai pas entendu. Réessaie avec le bouton Chercher.');
+      stopSearch();
+    };
+    r.onend = stopSearch;
+    try { r.start(); } catch (e) { console.error(e); stopSearch(); }
+  });
+}
+
+function runSearch(word) {
+  activeFilter = word;
+  renderNotes();
+  $('filterLabel').textContent = 'Résultats pour «\u00A0' + word + '\u00A0»';
+  $('filterBar').classList.add('on');
+  const hits = loadNotes().filter(n => n.text.toLowerCase().includes(word));
+  if (!hits.length) {
+    speak('Aucune note avec le mot ' + word + '.');
+    return;
+  }
+  const parts = [];
+  parts.push(hits.length === 1
+    ? 'J\u2019ai trouvé une note avec le mot ' + word + '.'
+    : 'J\u2019ai trouvé ' + hits.length + ' notes avec le mot ' + word + '.');
+  const toRead = hits.slice(0, 5);
+  for (const n of toRead) parts.push(fmtWhen(n.ts) + ' : ' + n.text + '.');
+  if (hits.length > 5) parts.push('Les autres sont affichées à l\u2019écran.');
+  speakLong(parts);
+}
+
+function clearFilter() {
+  activeFilter = null;
+  $('filterBar').classList.remove('on');
+  renderNotes();
+}
+
+$('todayBtn').onclick = readToday;
+$('searchBtn').onclick = startSearch;
+$('clearFilter').onclick = clearFilter;
 
 /* ---------- Horloge (repère temporel permanent) ---------- */
 function tick() {
