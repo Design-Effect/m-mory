@@ -9,6 +9,7 @@ Conçue pour un usage à un seul doigt, avec le moins de navigation possible : u
 - **Démarrer** : un tap sur le gros bouton, ou « Ok Google, ouvre Memory » — si le micro est autorisé en permanence, la session démarre toute seule à l'ouverture.
 - **Parler** : aussi longtemps qu'on veut, avec des pauses naturelles. Tout s'accumule dans **une seule note** (un bip discret confirme chaque bout capté, le texte s'affiche en direct).
 - **Arrêter** : dire **« terminé mémo »** ou **« fin de note »**, re-taper le bouton, ou 60 s de silence. Dans tous les cas, tout ce qui a été dit est sauvé.
+- **Corriger en parlant** : dire **« efface ça »** annule ce qui vient d'être dit ; **« efface tout »** ou **« on recommence »** vide la note en cours et repart de zéro. Un bip grave confirme l'effacement.
 - **📖 Ma journée** : relit à voix haute toutes les notes du jour, dans l'ordre chronologique.
 - **🔍 Chercher** : l'app demande « Quel mot ? », puis lit les notes qui le contiennent (5 max à voix haute, le reste filtré à l'écran).
 - **Écouter une note** : bouton 🔊 sur la carte. Les notes sont regroupées par jour (Aujourd'hui / Hier / date).
