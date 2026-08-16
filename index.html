@@ -496,8 +496,17 @@ const TTS = ('speechSynthesis' in window) ? window.speechSynthesis : null;
 let frVoice = null;
 function pickVoice() {
   if (!TTS) return;
-  const vs = TTS.getVoices().filter(v => v.lang && v.lang.startsWith('fr'));
-  frVoice = vs.find(v => v.lang === 'fr-BE') || vs.find(v => v.lang === 'fr-FR') || vs[0] || null;
+  const vs = TTS.getVoices().filter(v => v.lang && v.lang.toLowerCase().startsWith('fr'));
+  const score = v => {
+    const n = (v.name || '').toLowerCase();
+    let s = 0;
+    if (n.includes('natural') || n.includes('neural') || n.includes('enhanced') || n.includes('premium')) s += 40;
+    if (n.includes('google')) s += 30;
+    if (v.lang === 'fr-FR') s += 20;       // en général les moins robotiques
+    if (v.localService === false) s += 10; // voix réseau = souvent meilleure qualité
+    return s;
+  };
+  frVoice = vs.sort((a, b) => score(b) - score(a))[0] || null;
 }
 if (TTS) TTS.onvoiceschanged = pickVoice;
 pickVoice();
@@ -549,17 +558,56 @@ let rec = null;
 let session = false;        // une session d'écoute est en cours
 let recPaused = false;      // micro suspendu pendant le TTS
 let silenceTimer = null;
-let sessionBuffer = '';     // texte validé des cycles de reco précédents
-let cycleText = '';         // texte finalisé du cycle de reco EN COURS
+let sessionParts = [];      // segments validés (commandes d'effacement déjà appliquées)
+let cycleFinals = [];       // segments finalisés bruts du cycle de reco EN COURS
 let wakeLock = null;
 
+/* Commandes d'édition vocales pendant la session */
+const ERASE_LAST = ['efface ça', 'efface sa', 'annule ça', 'annule sa'];
+const ERASE_ALL  = ['efface tout', 'on recommence', 'recommence la note'];
+
+function findCmd(lower) {
+  // Première commande rencontrée dans le texte (position + type + longueur)
+  let best = null;
+  for (const p of ERASE_ALL) {
+    const i = lower.indexOf(p);
+    if (i !== -1 && (!best || i < best.i)) best = { i, len: p.length, all: true };
+  }
+  for (const p of ERASE_LAST) {
+    const i = lower.indexOf(p);
+    if (i !== -1 && (!best || i < best.i)) best = { i, len: p.length, all: false };
+  }
+  return best;
+}
+
+function applyEdits(baseParts, newFinals) {
+  // Rejoué à l'identique à chaque reconstruction du cycle → résultat stable.
+  const parts = [...baseParts];
+  for (const raw of newFinals) {
+    let txt = raw;
+    let cmd;
+    while ((cmd = findCmd(txt.toLowerCase()))) {
+      const before = txt.slice(0, cmd.i).trim();
+      if (cmd.all) parts.length = 0;            // « efface tout » : on repart de zéro
+      else if (before) { /* « bla bla efface ça » : le bla bla est jeté */ }
+      else parts.pop();                          // « efface ça » seul : retire le dernier segment
+      txt = txt.slice(cmd.i + cmd.len);
+    }
+    if (txt.trim()) parts.push(txt.trim());
+  }
+  return parts;
+}
+
+function currentParts() {
+  return applyEdits(sessionParts, cycleFinals);
+}
 function mergedText() {
-  return (sessionBuffer + ' ' + cycleText).trim();
+  return currentParts().join(' ').trim();
 }
 function commitCycle() {
-  // Un cycle de reco se termine : on fige son texte dans le buffer global.
-  sessionBuffer = mergedText();
-  cycleText = '';
+  // Un cycle de reco se termine : on fige son texte (édité) dans le buffer global.
+  sessionParts = currentParts();
+  cycleFinals = [];
 }
 function showBuffer() {
   const t = mergedText();
@@ -616,13 +664,21 @@ function makeRecognizer() {
       }
     }
     const newCycle = finals.join(' ');
-    if (newCycle !== cycleText) {
-      cycleText = newCycle;
-      beep(1200, 60);
+    if (newCycle !== cycleFinals.join(' ')) {
+      // Bip grave si une NOUVELLE commande d'effacement vient d'être captée
+      const countCmds = s => {
+        const l = s.toLowerCase();
+        return [...ERASE_LAST, ...ERASE_ALL].reduce((n, p) => n + l.split(p).length - 1, 0);
+      };
+      const hadCmds = countCmds(cycleFinals.join(' '));
+      cycleFinals = finals;
+      if (countCmds(newCycle) > hadCmds) beep(300, 180);
+      else beep(1200, 60);
     }
     // Détection du mot de fin (dans le finalisé OU l'interim)
     if (containsStop(mergedText() + ' ' + interim)) {
-      cycleText += (cycleText ? ' ' : '') + stripStop(interim); // ne pas perdre les derniers mots
+      const tail = stripStop(interim);
+      if (tail) cycleFinals.push(tail); // ne pas perdre les derniers mots
       endSession('voice');
       return;
     }
@@ -668,8 +724,8 @@ function resumeRecognitionIfSession() {
 
 async function startSession() {
   session = true;
-  sessionBuffer = '';
-  cycleText = '';
+  sessionParts = [];
+  cycleFinals = [];
   recPaused = false;
   document.body.classList.add('listening');
   btnLabel.textContent = 'J\u2019écoute…\n(appuie pour arrêter)';
@@ -695,9 +751,9 @@ function endSession(reason) {
   beep(440, 200);
   // Figer le cycle en cours, puis tout ce qui a été dit devient UNE note.
   commitCycle();
-  const text = stripStop(sessionBuffer).trim();
-  sessionBuffer = '';
-  cycleText = '';
+  const text = stripStop(sessionParts.join(' ')).trim();
+  sessionParts = [];
+  cycleFinals = [];
   let msg;
   if (text) {
     addNote(text);
