@@ -393,26 +393,29 @@ function renderNotes() {
 }
 
 /* ---------- Synthèse vocale ---------- */
+const TTS = ('speechSynthesis' in window) ? window.speechSynthesis : null;
 let frVoice = null;
 function pickVoice() {
-  const vs = speechSynthesis.getVoices().filter(v => v.lang && v.lang.startsWith('fr'));
+  if (!TTS) return;
+  const vs = TTS.getVoices().filter(v => v.lang && v.lang.startsWith('fr'));
   frVoice = vs.find(v => v.lang === 'fr-BE') || vs.find(v => v.lang === 'fr-FR') || vs[0] || null;
 }
-speechSynthesis.onvoiceschanged = pickVoice;
+if (TTS) TTS.onvoiceschanged = pickVoice;
 pickVoice();
 
 let speakSeq = 0;          // identifiant de la dernière utterance demandée
 let speakingText = null;   // texte actuellement en cours de synthèse
 
 function speak(text, onDone) {
+  if (!TTS) { if (onDone) onDone(); return; }
   // Anti-boucle : si exactement ce texte est déjà en train d'être dit, on ignore
-  if (speakingText === text && speechSynthesis.speaking) return;
+  if (speakingText === text && TTS.speaking) return;
 
   // On coupe le micro pendant que l'app parle pour ne pas s'auto-transcrire
   pauseRecognition();
   const myId = ++speakSeq;
   speakingText = text;
-  speechSynthesis.cancel();
+  TTS.cancel();
   const u = new SpeechSynthesisUtterance(text);
   u.lang = 'fr-FR';
   if (frVoice) u.voice = frVoice;
@@ -425,7 +428,7 @@ function speak(text, onDone) {
     if (onDone) onDone();
     resumeRecognitionIfSession();
   };
-  speechSynthesis.speak(u);
+  TTS.speak(u);
 }
 
 /* ---------- Sons courts (début / fin) ---------- */
@@ -447,13 +450,21 @@ let rec = null;
 let session = false;        // une session d'écoute est en cours
 let recPaused = false;      // micro suspendu pendant le TTS
 let silenceTimer = null;
-let sessionBuffer = '';     // tout ce qui a été dit pendant la session = UNE note
+let sessionBuffer = '';     // texte validé des cycles de reco précédents
+let cycleText = '';         // texte finalisé du cycle de reco EN COURS
 let wakeLock = null;
 
+function mergedText() {
+  return (sessionBuffer + ' ' + cycleText).trim();
+}
+function commitCycle() {
+  // Un cycle de reco se termine : on fige son texte dans le buffer global.
+  sessionBuffer = mergedText();
+  cycleText = '';
+}
 function showBuffer() {
-  // Aperçu du texte accumulé (fin du texte si trop long)
-  const t = sessionBuffer;
-  statusEl.textContent = t.length > 140 ? '… ' + t.slice(-140) : t;
+  const t = mergedText();
+  statusEl.textContent = t.length > 140 ? '… ' + t.slice(-140) : (t || 'Parle, je note tout.');
 }
 
 if (!SR) {
@@ -486,33 +497,43 @@ function makeRecognizer() {
   r.continuous = true;
   r.interimResults = true;
   r.onresult = e => {
+    // ANDROID FIX : Chrome relivre les mêmes segments plusieurs fois
+    // (en versions qui grandissent). On ne concatène donc JAMAIS
+    // événement par événement : on RECONSTRUIT tout le texte du cycle
+    // depuis e.results, avec déduplication.
+    const finals = [];
     let interim = '';
-    for (let i = e.resultIndex; i < e.results.length; i++) {
-      const res = e.results[i];
-      const text = res[0].transcript.trim();
-      if (res.isFinal) {
-        interimEl.textContent = '';
-        if (!text) continue;
-        const wantsStop = containsStop(text);
-        const clean = stripStop(text);
-        if (clean) {
-          // On accumule : la note complète sera créée à la FIN de la session.
-          sessionBuffer += (sessionBuffer ? ' ' : '') + clean;
-          beep(1200, 60);
-          showBuffer();
-        }
-        if (wantsStop) { endSession('voice'); return; }
-        resetSilenceTimer();
+    for (let i = 0; i < e.results.length; i++) {
+      const t = e.results[i][0].transcript.trim();
+      if (!t) continue;
+      if (e.results[i].isFinal) {
+        const last = finals[finals.length - 1];
+        if (last === t) continue;                       // doublon exact
+        if (last && t.startsWith(last)) finals[finals.length - 1] = t;  // version étendue du même segment
+        else if (last && last.endsWith(t)) continue;    // sous-partie déjà couverte
+        else finals.push(t);
       } else {
-        interim = text;
-        resetSilenceTimer();
+        interim += (interim ? ' ' : '') + t;
       }
     }
-    if (interim) interimEl.textContent = '« ' + interim + ' »';
+    const newCycle = finals.join(' ');
+    if (newCycle !== cycleText) {
+      cycleText = newCycle;
+      beep(1200, 60);
+    }
+    // Détection du mot de fin (dans le finalisé OU l'interim)
+    if (containsStop(mergedText() + ' ' + interim)) {
+      cycleText += (cycleText ? ' ' : '') + stripStop(interim); // ne pas perdre les derniers mots
+      endSession('voice');
+      return;
+    }
+    interimEl.textContent = interim ? '« ' + interim + ' »' : '';
+    showBuffer();
+    resetSilenceTimer();
   };
   r.onend = () => {
-    // Chrome coupe la reco régulièrement : on relance tant que la session est active.
-    // Petit délai + recréation du recognizer en secours (Android est capricieux).
+    // Fin d'un cycle de reco : on fige son texte, puis on relance si besoin.
+    commitCycle();
     if (session && !recPaused) {
       setTimeout(() => {
         if (!session || recPaused) return;
@@ -549,6 +570,7 @@ function resumeRecognitionIfSession() {
 async function startSession() {
   session = true;
   sessionBuffer = '';
+  cycleText = '';
   recPaused = false;
   document.body.classList.add('listening');
   btnLabel.textContent = 'J\u2019écoute…\n(appuie pour arrêter)';
@@ -572,10 +594,11 @@ function endSession(reason) {
   btnLabel.textContent = 'Appuie et parle';
   interimEl.textContent = '';
   beep(440, 200);
-  // Tout ce qui a été dit devient UNE note — même si la session
-  // se ferme par silence ou par tap, rien n'est perdu.
-  const text = sessionBuffer.trim();
+  // Figer le cycle en cours, puis tout ce qui a été dit devient UNE note.
+  commitCycle();
+  const text = stripStop(sessionBuffer).trim();
   sessionBuffer = '';
+  cycleText = '';
   let msg;
   if (text) {
     addNote(text);
@@ -584,12 +607,12 @@ function endSession(reason) {
     msg = 'Session terminée. Aucune note.';
   }
   statusEl.textContent = msg;
-  if (reason !== 'error') {
-    speechSynthesis.cancel();
+  if (reason !== 'error' && TTS) {
+    TTS.cancel();
     const u = new SpeechSynthesisUtterance(msg);
     u.lang = 'fr-FR';
     if (frVoice) u.voice = frVoice;
-    speechSynthesis.speak(u);
+    TTS.speak(u);
   }
 }
 
