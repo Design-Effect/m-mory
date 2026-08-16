@@ -629,6 +629,20 @@ function containsStop(text) {
   const t = text.toLowerCase();
   return STOP_PHRASES.some(p => t.includes(p));
 }
+
+/* Commandes d'action pendant la session :
+   « lis ma journée » → lecture du jour ; « cherche le mot X » → recherche de X */
+const TODAY_PHRASES = ['lis ma journée', 'lit ma journée', 'lis moi ma journée', 'lis-moi ma journée'];
+function findAction(text) {
+  const l = text.toLowerCase();
+  for (const p of TODAY_PHRASES) {
+    const i = l.indexOf(p);
+    if (i !== -1) return { kind: 'today', i };
+  }
+  const m = l.match(/cherche le mot\s+(.+)$/);
+  if (m && m[1].trim()) return { kind: 'search', i: m.index, word: m[1].trim() };
+  return null;
+}
 function stripStop(text) {
   let t = text;
   for (const p of STOP_PHRASES) {
@@ -680,6 +694,18 @@ function makeRecognizer() {
       const tail = stripStop(interim);
       if (tail) cycleFinals.push(tail); // ne pas perdre les derniers mots
       endSession('voice');
+      return;
+    }
+    // Commandes d'action vocales (détectées dans le finalisé uniquement,
+    // pour ne pas déclencher sur une phrase à moitié entendue)
+    const cycleJoined = cycleFinals.join(' ');
+    const act = findAction(cycleJoined);
+    if (act) {
+      // On garde ce qui a été dit AVANT la commande comme note éventuelle
+      const before = cycleJoined.slice(0, act.i).trim();
+      cycleFinals = before ? [before] : [];
+      endSession('voice', true); // fin silencieuse : on enchaîne sur l'action
+      setTimeout(() => act.kind === 'today' ? readToday() : runSearch(act.word), 250);
       return;
     }
     interimEl.textContent = interim ? '« ' + interim + ' »' : '';
@@ -738,7 +764,7 @@ async function startSession() {
   speak('Je t\u2019écoute.', () => resetSilenceTimer());
 }
 
-function endSession(reason) {
+function endSession(reason, silent) {
   if (!session) return;
   session = false;
   clearTimeout(silenceTimer);
@@ -762,7 +788,7 @@ function endSession(reason) {
     msg = 'Session terminée. Aucune note.';
   }
   statusEl.textContent = msg;
-  if (reason !== 'error' && TTS) {
+  if (reason !== 'error' && !silent && TTS) {
     TTS.cancel();
     const u = new SpeechSynthesisUtterance(msg);
     u.lang = 'fr-FR';
@@ -786,7 +812,12 @@ function openDelete(note) {
   delTarget = note;
   $('delPreview').textContent = '« ' + note.text + ' »';
   delOverlay.classList.add('open');
-  speak('Garde le doigt appuyé sur le bouton rouge pour supprimer.');
+  // L'instruction vocale n'est dite qu'à la toute première utilisation,
+  // ensuite le visuel suffit.
+  if (!localStorage.getItem('mv_del_hint_done')) {
+    localStorage.setItem('mv_del_hint_done', '1');
+    speak('Garde le doigt appuyé sur le bouton rouge pour supprimer.');
+  }
 }
 function closeDelete() {
   delOverlay.classList.remove('open');
