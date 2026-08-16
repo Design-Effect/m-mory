@@ -1,12 +1,12 @@
-# Memory — v1
+# Memoria — v1
 
-PWA de mémoire vocale : un tap (ou « Ouvre Memory »), une session d'écoute continue, tout ce qui est dit devient une note relisible à voix haute.
+PWA de mémoire vocale : un tap (ou « Ouvre Memoria »), une session d'écoute continue, tout ce qui est dit devient une note relisible à voix haute.
 
 Conçue pour un usage à un seul doigt, avec le moins de navigation possible : un seul écran, interaction vocale au maximum.
 
 ## Fonctionnement
 
-- **Démarrer** : un tap sur le gros bouton, ou « Ok Google, ouvre Memory » — si le micro est autorisé en permanence, la session démarre toute seule à l'ouverture.
+- **Démarrer** : un tap sur le gros bouton, ou « Ok Google, ouvre Memoria » — si le micro est autorisé en permanence, la session démarre toute seule à l'ouverture.
 - **Parler** : aussi longtemps qu'on veut, avec des pauses naturelles. Tout s'accumule dans **une seule note** (un bip discret confirme chaque bout capté, le texte s'affiche en direct).
 - **Arrêter** : dire **« terminé mémo »** ou **« fin de note »**, re-taper le bouton, ou 60 s de silence. Dans tous les cas, tout ce qui a été dit est sauvé.
 - **Corriger en parlant** : dire **« efface ça »** annule ce qui vient d'être dit ; **« efface tout »** ou **« on recommence »** vide la note en cours et repart de zéro. Un bip grave confirme l'effacement.
@@ -21,7 +21,7 @@ Conçue pour un usage à un seul doigt, avec le moins de navigation possible : u
 - **Chrome Android / Chrome desktop uniquement** (API Web Speech). Firefox non supporté.
 - **HTTPS obligatoire** pour le micro → GitHub Pages convient parfaitement.
 - Notes stockées en **localStorage local à l'appareil** (pas de synchro téléphone/PC en v1).
-- Le nom d'app est volontairement **« Memory » sans accent** dans le manifest : Gemini / Google Assistant ne retrouvent pas le nom avec accent.
+- Le nom d'app est volontairement **« Memoria » sans accent** dans le manifest : Gemini / Google Assistant ne retrouvent pas le nom avec accent.
 
 ## Déploiement (GitHub Pages)
 
@@ -33,11 +33,11 @@ Conçue pour un usage à un seul doigt, avec le moins de navigation possible : u
 
 ## Mise à jour de l'app
 
-À chaque modification, incrémenter la version du cache dans `sw.js` (`memory-vX`), pousser, puis fermer/rouvrir l'app sur le téléphone. Si le nom ou l'icône changent dans le manifest, désinstaller et réinstaller l'app.
+À chaque modification, incrémenter la version du cache dans `sw.js` (`memoria-vX`), pousser, puis fermer/rouvrir l'app sur le téléphone. Si le nom ou l'icône changent dans le manifest, désinstaller et réinstaller l'app.
 
 ## Ouverture vocale (Gemini)
 
-- Dire « Ouvre Memory ». Si Gemini ne trouve pas l'app : vérifier qu'elle apparaît dans Paramètres Android → Applications (sinon la réinstaller via « Installer l'application »).
+- Dire « Ouvre Memoria ». Si Gemini ne trouve pas l'app : vérifier qu'elle apparaît dans Paramètres Android → Applications (sinon la réinstaller via « Installer l'application »).
 - Si Gemini n'ouvre aucune app : Gemini → profil → Paramètres → Applis connectées → vérifier « Utilitaires », et vérifier que « Conserver l'activité » est activé dans le menu Activité.
 
 ## Backlog v1.1 (non inclus volontairement)
