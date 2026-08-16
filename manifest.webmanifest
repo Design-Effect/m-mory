@@ -1,6 +1,6 @@
 {
-  "name": "Mémory",
-  "short_name": "Mémory",
+  "name": "Memory",
+  "short_name": "Memory",
   "description": "Ta mémoire vocale : appuie, parle, c'est noté.",
   "lang": "fr",
   "start_url": "./index.html",
