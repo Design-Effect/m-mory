@@ -1,0 +1,14 @@
+{
+  "name": "Mémory",
+  "short_name": "Mémory",
+  "description": "Ta mémoire vocale : appuie, parle, c'est noté.",
+  "lang": "fr",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#FCF6F9",
+  "theme_color": "#6F5BA8",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}
